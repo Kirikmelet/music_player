@@ -1,0 +1,25 @@
+[package]
+name = "music_player"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.71"
+cpal = "0.15.2"
+crossterm = "0.26.1"
+ratatui = { version = "0.21.0", features = ["all-widgets", "macros", "serde"] }
+serde = { version = "1.0.164", features = ["derive"] }
+tokio = { version = "1.28.2", features = ["windows-sys", "full"] }
+toml_edit = { version = "0.19.11", features = ["serde"] }
+walkdir = "2.3.3"
+symphonia = {version="^0.5.3", features = ["all"]}
+dirs = "5.0.1"
+
+[build-dependencies]
+curl = "0.4.44"
+zip = "0.6.3"
+
+[features]
+opus = []
