@@ -9,13 +9,19 @@ edition = "2021"
 anyhow = "1.0.71"
 cpal = "0.15.2"
 crossterm = "0.26.1"
-ratatui = { version = "0.21.0", features = ["all-widgets", "macros", "serde"] }
+ratatui = { version = "0.24.0", features = ["all-widgets", "macros", "serde"] }
 serde = { version = "1.0.164", features = ["derive"] }
 tokio = { version = "1.28.2", features = ["windows-sys", "full"] }
 toml_edit = { version = "0.19.11", features = ["serde"] }
 walkdir = "2.3.3"
-symphonia = {version="^0.5.3", features = ["all"]}
+symphonia = { version = "^0.5.3", features = ["all"] }
 dirs = "5.0.1"
+async-trait = "0.1.74"
+jammdb = "0.11.0"
+once_cell = "1.18.0"
+directories = "5.0.1"
+rmp = "0.8.12"
+rmp-serde = "1.1.2"
 
 [build-dependencies]
 curl = "0.4.44"

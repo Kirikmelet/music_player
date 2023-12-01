@@ -1,88 +1,40 @@
-use std::io::Stdout;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering::Relaxed;
-use std::sync::{Arc, Mutex};
-
-use std::io::stdout;
-use std::thread::JoinHandle;
-
-use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+use crate::event::EventReader;
+use crate::page::app::AppState;
+use crate::page::PageMsgActor;
+use crate::page::{app::App, Page, StatefulPage};
+use anyhow::{Ok, Result};
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture},
-    execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    ExecutableCommand,
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{prelude::CrosstermBackend, Terminal};
 
-use crate::app::{App, AppState};
-use crate::events::{EventEnum, Events};
-use crate::input::_Input;
-use crate::ui::Ui;
-use crate::ui::{base_ui::BaseUi, AppUi};
-
-fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
-    let mut stdout = stdout();
+pub async fn run() -> Result<()> {
+    // initialize terminal
+    let mut stdout = std::io::stdout();
+    stdout.execute(EnterAlternateScreen)?;
     enable_raw_mode()?;
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let terminal = Terminal::new(backend)?;
-    Ok(terminal)
-}
-
-fn end_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    disable_raw_mode()?;
-    terminal.show_cursor()?;
-    Ok(())
-}
-
-pub fn run(app: Arc<Mutex<App>>) -> Result<()> {
-    let mut terminal = setup_terminal()?;
-    let g_global_kill: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-    let events: Events = Events::run(g_global_kill.clone());
-    let _input = _Input::new(app.clone());
-    let mut ui: Ui = Ui::new();
+    let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
+    // Event Reader
+    let mut event_reader = EventReader::new();
+    // Application Page
+    let mut app = App::new();
+    app.init(PageMsgActor {
+        tx: Some(event_reader.get_sender()),
+        id: "app".to_string(),
+        parent_id: "".to_string(),
+    });
+    // Main Loop
     loop {
-        terminal.draw(|f| {
-            ui.render(f);
-        })?;
-        {
-            //let event = events.read();
-            //input.read(event).unwrap();
-            let Ok(mut app) = app.try_lock() else {
-                continue;
-            };
-            //match app.state {
-            //    AppState::Quit => {
-            //        g_global_kill.store(true, Relaxed);
-            //        break;
-            //    }
-            //    AppState::Normal => {}
-            //}
-            match events.read() {
-                Some(EventEnum::Input(key_event)) => match key_event {
-                    KeyEvent {
-                        code: KeyCode::Char('q'),
-                        kind: KeyEventKind::Press,
-                        modifiers: KeyModifiers::NONE,
-                        state: KeyEventState::NONE,
-                    } => {
-                        break;
-                    }
-                    _ => {}
-                },
-                _ => {
-                    ui.update(None);
-                }
-            }
+        terminal.draw(|f| app.render(f, f.size()))?;
+        if app.get_state() == AppState::Quit {
+            break;
         }
+        app.handle_events(event_reader.read().await).await?;
     }
-    end_terminal(&mut terminal)?;
-    // events.join();
+    // de-initialize terminal
+    std::io::stdout().execute(LeaveAlternateScreen)?;
+    disable_raw_mode()?;
+    println!("Goodbye!");
     Ok(())
 }
