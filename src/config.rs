@@ -2,7 +2,7 @@ use anyhow::{Ok, Result};
 use std::{
     fs::{DirBuilder, File},
     io::{BufReader, BufWriter, Read, Write},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use serde::{Deserialize, Serialize};
@@ -37,7 +37,6 @@ impl Default for AppConfigDir {
 #[derive(Debug, Clone, Default)]
 pub struct AppConfigHandler {
     config: AppConfig,
-    config_path: PathBuf,
 }
 
 impl AppConfigHandler {
@@ -51,10 +50,7 @@ impl AppConfigHandler {
             Self::write_default(&config_path)?;
         }
         let config = Self::read_config_file(&config_path).unwrap_or_default();
-        Ok(Self {
-            config,
-            config_path,
-        })
+        Ok(Self { config })
     }
     pub fn write_default<P: AsRef<Path>>(file_path: P) -> Result<()> {
         let file = File::create(file_path.as_ref())?;

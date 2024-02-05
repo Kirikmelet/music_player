@@ -1,74 +1,56 @@
-use std::path::PathBuf;
+use std::path::Path;
 
-use crate::event::AppEvent;
+use crate::db::audio_scanner::AudioScanner;
 
-use super::{Page, PageMsgActor, StatefulPage};
-use anyhow::{Ok, Result};
+use super::Page;
 use async_trait::async_trait;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use futures::pin_mut;
 use ratatui::{
     prelude::{Alignment, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame,
 };
-use walkdir::{DirEntry, WalkDir};
+use tokio_stream::StreamExt;
 
-pub const FILE_LIST_MSG_REFRESH_DB: &'static str = "file_list_msg_refresh_db";
-pub const FILE_LIST_MSG_GET_DB: &'static str = "file_list_msg_get_db";
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum FileListMsg {
-    SetDir(PathBuf),
-    State(FileListState),
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub enum FileListState {
-    #[default]
-    Active,
-    Inactive,
-}
-
-#[derive(Debug, Clone, Default)]
+#[derive(Debug)]
 pub struct FileList {
-    dir: PathBuf,
-    file_list: Vec<DirEntry>,
+    file_list: Vec<String>,
     file_list_state: ListState,
     style: Style,
-    state: FileListState,
-    actor: PageMsgActor,
 }
 
 impl FileList {
     pub fn new() -> Self {
-        // todo! Impelement a config system! For now I am using hard-coded directories
-        let dir = PathBuf::from("C:\\Users\\troyd\\Music");
         let mut file_list_state = ListState::default();
-        let file_list = Self::build_file_contents(&dir);
-        if !file_list.is_empty() {
-            file_list_state.select(Some(0));
-        }
+        let file_list: Vec<String> = Vec::new();
+        file_list_state.select(Some(0));
         let style = Style::default();
         Self {
-            dir,
             style,
             file_list,
             file_list_state,
-            ..Default::default()
         }
     }
-    pub fn init(&mut self, actor: PageMsgActor) {
-        self.register_actor_details(actor.clone());
+    pub fn _set_file_list(&mut self, file_list: Vec<String>) {
+        tracing::info!("Recieved: {} items", file_list.len());
+        self.file_list = file_list;
     }
-    fn build_file_contents(dir: &PathBuf) -> Vec<DirEntry> {
-        let directory_entries = WalkDir::new(dir);
-        directory_entries
-            .sort_by_file_name()
-            .into_iter()
-            .filter_map(|f| f.ok())
-            .collect()
+    pub async fn update_file_list<P: AsRef<Path>>(&mut self, path: P) {
+        let stream = AudioScanner::scan_dir(path);
+        // Only for debugging
+        let mut item_count: i32 = 0;
+        // We need to pin this as of now
+        pin_mut!(stream);
+        // For loops dont work with streams (yet)
+        while let Some(item) = stream.next().await {
+            tracing::info!("Recieved item: {} item", item.display());
+            self.file_list.push(item.display().to_string());
+            item_count += 1;
+        }
+        tracing::info!("Recieved total items: {}", item_count);
     }
-    fn next(&mut self) {
+    pub fn next(&mut self) {
         if self.file_list.is_empty() {
             return;
         }
@@ -84,7 +66,7 @@ impl FileList {
         };
         self.file_list_state.select(Some(i));
     }
-    fn prev(&mut self) {
+    pub fn prev(&mut self) {
         if self.file_list.is_empty() {
             return;
         }
@@ -104,75 +86,6 @@ impl FileList {
 
 #[async_trait]
 impl Page for FileList {
-    type Message = FileListMsg;
-    async fn update(&mut self, msg: Self::Message) -> Result<()> {
-        match msg {
-            FileListMsg::SetDir(dir) => {
-                self.dir = dir.clone();
-                self.file_list = Self::build_file_contents(&dir);
-                let _ = self.file_list.pop();
-                return Ok(());
-            }
-            FileListMsg::State(state) => {
-                self.state = state;
-                match state {
-                    FileListState::Inactive => {
-                        self.style = self.style.add_modifier(Modifier::DIM);
-                    }
-                    FileListState::Active => {
-                        self.style = self.style.remove_modifier(Modifier::DIM);
-                    }
-                };
-                return Ok(());
-            }
-        }
-    }
-    async fn handle_events(&mut self, event: AppEvent) -> Result<()> {
-        if self.get_state() == FileListState::Inactive {
-            return Ok(());
-        }
-        match event {
-            AppEvent::Key(x) => match x {
-                KeyEvent {
-                    code: KeyCode::Char('j'),
-                    kind: KeyEventKind::Press,
-                    ..
-                } => {
-                    self.next();
-                    return Ok(());
-                }
-                KeyEvent {
-                    code: KeyCode::Char('k'),
-                    kind: KeyEventKind::Press,
-                    ..
-                } => {
-                    self.prev();
-                    return Ok(());
-                }
-                KeyEvent {
-                    code: KeyCode::Enter,
-                    kind: KeyEventKind::Press,
-                    ..
-                } => {
-                    let actor = self.actor.clone();
-                    if let Some(action_tx) = actor.tx {}
-                    return Ok(());
-                }
-                KeyEvent {
-                    code: KeyCode::Char('R'),
-                    kind: KeyEventKind::Press,
-                    ..
-                } => {
-                    let actor = self.actor.clone();
-                    if let Some(action_tx) = actor.tx {}
-                    return Ok(());
-                }
-                _ => Ok(()),
-            },
-            AppEvent::Msg(_sender, app_msg) => return Ok(()),
-            _ => Ok(()),
-        }
-    }
     fn render(&mut self, frame: &mut Frame, rect: Rect) {
         let block = Block::default().borders(Borders::ALL).title("File list");
         if self.file_list.is_empty() {
@@ -185,20 +98,7 @@ impl Page for FileList {
         let items: Vec<ListItem<'_>> = self
             .file_list
             .iter()
-            .filter_map(|f| {
-                let name = f.file_name().to_str().map(|f| String::from(f));
-                let style = if f.file_type().is_dir() {
-                    Style::default()
-                        .fg(Color::Blue)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                };
-                match name {
-                    Some(name) => Some(ListItem::new(name).style(style)),
-                    None => None,
-                }
-            })
+            .map(|f| ListItem::new(f.as_str()))
             .collect();
         let list = List::new(items)
             .block(block)
@@ -211,17 +111,52 @@ impl Page for FileList {
             );
         frame.render_stateful_widget(list, rect, &mut self.file_list_state);
     }
-    fn register_actor_details(&mut self, tx: PageMsgActor) {
-        self.actor = tx;
-    }
-    fn get_actor_details(&self) -> &PageMsgActor {
-        &self.actor
-    }
 }
 
-impl StatefulPage for FileList {
-    type State = FileListState;
-    fn get_state(&self) -> Self::State {
-        self.state
-    }
-}
+//#[async_trait]
+//impl StatefulPage for FileList {
+//    type State = FileListState;
+//    type Message = FileListMsg;
+//    async fn update(&mut self, msg: Self::Message) -> Option<Self::Message> {
+//        match msg {
+//            FileListMsg::State(state) => {
+//                self.state = state;
+//                match state {
+//                    FileListState::Inactive => {
+//                        self.style = self.style.add_modifier(Modifier::DIM);
+//                    }
+//                    FileListState::Active => {
+//                        self.style = self.style.remove_modifier(Modifier::DIM);
+//                    }
+//                };
+//            }
+//            FileListMsg::UpdateFileList(list) => {
+//                self.file_list = list;
+//            }
+//            FileListMsg::Increment => {
+//                self.next();
+//            }
+//            FileListMsg::Decrement => {
+//                self.prev();
+//            }
+//        }
+//        None
+//    }
+//    async fn handle_events(&mut self, event: AppEvent) -> Option<Self::Message> {
+//        if self.get_state() == FileListState::Inactive {
+//            return None;
+//        }
+//        match event {
+//            AppEvent::Key(x) => match x {
+//                KeyCode::Char('j') => return Some(FileListMsg::Increment),
+//                KeyCode::Char('k') => return Some(FileListMsg::Decrement),
+//                _ => {}
+//            },
+//            _ => {}
+//        }
+//        None
+//    }
+//    fn get_state(&self) -> Self::State {
+//        self.state
+//    }
+//}

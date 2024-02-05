@@ -1,7 +1,8 @@
-use crate::event::EventReader;
-use crate::page::app::AppState;
-use crate::page::PageMsgActor;
-use crate::page::{app::App, Page, StatefulPage};
+use crate::event::{AppEvent, EventReader};
+use crate::page::{
+    app::{App, AppState},
+    Page, StatefulPage,
+};
 use anyhow::{Ok, Result};
 use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -17,20 +18,23 @@ pub async fn run() -> Result<()> {
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
     // Event Reader
     let mut event_reader = EventReader::new();
+    // Component Service
     // Application Page
     let mut app = App::new();
-    app.init(PageMsgActor {
-        tx: Some(event_reader.get_sender()),
-        id: "app".to_string(),
-        parent_id: "".to_string(),
-    });
+    app.init().await;
     // Main Loop
     loop {
-        terminal.draw(|f| app.render(f, f.size()))?;
         if app.get_state() == AppState::Quit {
             break;
         }
-        app.handle_events(event_reader.read().await).await?;
+        let event = event_reader.read().await?;
+        if &event == &AppEvent::Render {
+            terminal.draw(|f| app.render(f, f.size()))?;
+        }
+        let mut msg = app.handle_events(event).await;
+        while msg != None {
+            msg = app.update(msg.unwrap()).await;
+        }
     }
     // de-initialize terminal
     std::io::stdout().execute(LeaveAlternateScreen)?;

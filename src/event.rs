@@ -1,59 +1,80 @@
-use std::{future::Future, thread, time::Duration};
+use anyhow::anyhow;
+use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyEvent, MouseEvent};
-use tokio::sync::{
-    mpsc::{self, UnboundedReceiver, UnboundedSender},
-    oneshot,
+use futures::{FutureExt, StreamExt};
+
+use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, MouseEvent};
+use tokio::{
+    select,
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
 
-use crate::page::app::App;
-
-pub type EventCallback = dyn Future<Output = Result<(), anyhow::Error>>;
-
-#[derive(Debug, Clone)]
-pub struct AppEventMsg {
-    pub sender_id: String,
-    pub recipient_id: String, // The intended recipient
-    pub msg_id: &'static str, // The msg title
-    pub msg: Vec<u8>,         // The message (encoded in bytes for shits and giggles)
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq)]
 pub enum AppEvent {
     Tick,
-    Key(KeyEvent),
+    Error,
+    Render,
+    // Input
+    Key(KeyCode),
     Mouse(MouseEvent),
-    Msg(AppEventMsg), // sender, msg details
 }
 
 pub struct EventReader {
     rx: UnboundedReceiver<AppEvent>,
-    tx: UnboundedSender<AppEvent>,
+    _tx: UnboundedSender<AppEvent>,
 }
 
 impl EventReader {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::unbounded_channel::<AppEvent>();
         let thread_tx = tx.clone();
-        thread::spawn(move || loop {
-            if event::poll(Duration::from_millis(250)).unwrap() {
-                if match event::read().unwrap() {
-                    Event::Key(x) => thread_tx.send(AppEvent::Key(x)),
-                    Event::Mouse(x) => thread_tx.send(AppEvent::Mouse(x)),
-                    _ => thread_tx.send(AppEvent::Tick),
+        tokio::spawn(async move {
+            loop {
+                let mut event_stream: EventStream = EventStream::new();
+                let event_read = event_stream.next().fuse();
+                let mut tick_interval = tokio::time::interval(Duration::from_millis(500));
+                let mut render_interval =
+                    tokio::time::interval(Duration::from_secs_f64(1f64 / 60f64));
+                let tick_delay = tick_interval.tick();
+                let render_delay = render_interval.tick();
+                select! {
+                    event_opt = event_read => {
+                        match event_opt {
+                            Some(Ok(event)) => {
+                                match event {
+                                    Event::Key(x) if x.kind == KeyEventKind::Press => {thread_tx.send(AppEvent::Key(x.code)).unwrap();}
+                                    Event::Mouse(x) => {thread_tx.send(AppEvent::Mouse(x)).unwrap();}
+                                    _ => {}
+                                }
+                            }
+                            Some(Err(_)) => {
+                                thread_tx.send(AppEvent::Error).unwrap();
+                            }
+                            None => {}
+                        };
+                    },
+                    _ = tick_delay => {
+                        thread_tx.send(AppEvent::Tick).unwrap();
+                    },
+                    _ = render_delay => {
+                        thread_tx.send(AppEvent::Render).unwrap();
+                    }
                 }
-                .is_err()
-                {
-                    break;
-                };
             }
+            //loop {
+            //    if event::poll(Duration::from_millis(250)).unwrap() {
+            //        match event::read().unwrap() {
+            //            Event::Key(x) => thread_tx.send(AppEvent::Key(x.code)),
+            //            Event::Mouse(x) => thread_tx.send(AppEvent::Mouse(x)),
+            //            _ => thread_tx.send(AppEvent::Tick),
+            //        }
+            //        .unwrap()
+            //    }
+            //}
         });
-        Self { rx, tx }
+        Self { rx, _tx: tx }
     }
-    pub async fn read(&mut self) -> AppEvent {
-        self.rx.try_recv().unwrap_or(AppEvent::Tick)
-    }
-    pub fn get_sender(&mut self) -> UnboundedSender<AppEvent> {
-        self.tx.clone()
+    pub async fn read(&mut self) -> anyhow::Result<AppEvent> {
+        self.rx.recv().await.ok_or(anyhow!("cum"))
     }
 }
