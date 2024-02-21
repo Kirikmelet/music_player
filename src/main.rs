@@ -1,4 +1,4 @@
-use audio::_audio_play_test_file;
+use audio::{_audio_play_test_file, player::AudioPlayer};
 use run::run;
 
 mod audio;
@@ -18,9 +18,11 @@ async fn main() {
         .with_writer(non_blocking_log_file)
         .init();
     //run().await.unwrap();
-    _audio_play_test_file("./test/beep.wav");
+    // _audio_play_test_file("./test/beep.wav");
     // _audio_play_test_file("./test/beep.ogg");
     // _audio_play_test_file("./test/wangxian.opus");
-    // _audio_play_test_file("./test/futari.mp3");
-    // _audio_play_test_file("./test/futari.flac");
+    // _audio_play_test_file("./test/futari.wav");
+    _audio_play_test_file("./test/futari.flac");
+    let mut audio_player: AudioPlayer<f32> = AudioPlayer::new();
+    audio_player.play_file("./test/futari.flac");
 }

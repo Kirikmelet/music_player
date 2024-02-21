@@ -28,6 +28,7 @@ async-stream = "0.3.5"
 tokio-stream = "0.1.14"
 ffmpeg-next = "6.1.1"
 ringbuf = "0.3.3"
+num = "0.4.1"
 
 [features]
 opus = []
